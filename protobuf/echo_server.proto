@@ -1,6 +1,9 @@
 syntax = "proto3";
-
 package echo;
+option go_package="/";
+
+//  protoc --go_out=. --plugin=protorpc *.proto
+// protorpc 需要另行安装
 
 message EchoRequest {
     string val = 1;

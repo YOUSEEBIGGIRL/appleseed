@@ -1,70 +1,44 @@
-package easyrpc
+package appleseed
 
 import (
-	"errors"
+	"github.com/YOUSEEBIGGIRL/appleseed/codec"
 	"log"
 	"reflect"
-	"strings"
 	"sync"
 )
 
+// service 可以理解为是一个 struct
 type service struct {
-	registerStruct sync.Map
+	name    string
+	typ     reflect.Type
+	val     reflect.Value
+	methods map[string]*MethodInfo
 }
 
-func (s *service) Register(obj interface{}) error {
-	kind := reflect.TypeOf(obj).Kind()
-	if kind == reflect.Ptr {
-		if reflect.TypeOf(obj).Elem().Kind() != reflect.Struct {
-			panic("传入的参数不是一个结构体")
-		}
-	} else if reflect.TypeOf(obj).Kind() != reflect.Struct {
-		panic("传入的参数不是一个结构体")
-	}
-
-
-	val := reflect.ValueOf(obj)
-
-	structName := reflect.Indirect(reflect.ValueOf(obj)).Type().Name()
-	if structName == "" {
-		return errors.New("TODO")
-	}
-
-	if _, ok := s.registerStruct.LoadOrStore(structName, val); ok {
-		return errors.New("该结构体已经注册")
-	}
-
-	log.Println(structName, "register ok")
-
-	return nil
+type MethodInfo struct {
+	sync.Mutex
+	method    reflect.Method
+	ArgType   reflect.Type
+	ReplyType reflect.Type
+	callNum   uint64
 }
 
-func (s *service) call(service string, param, res interface{}) error {
-	index := strings.Index(service, ".")
-	if index == -1 {
-		return errors.New("wrong service, format: [struct.func]")
+func (s *service) call(srv *Server, sendLock *sync.Mutex, wg *sync.WaitGroup, method *MethodInfo, c codec.ServerCodec, req *codec.RequestHeader, argv, replyv reflect.Value) {
+	if wg != nil {
+		defer wg.Done()
 	}
+	method.Lock()
+	method.callNum++
+	method.Unlock()
 
-	obj := service[:index]
-	fn := service[index+1:]
-
-	log.Println(obj, fn)
-	load, ok := s.registerStruct.Load(obj)
-	if !ok {
-		return errors.New("not found this obj, you need register first")
+	returnValues := method.method.Func.Call([]reflect.Value{s.val, argv, replyv})
+	log.Println("after call, reply value: ", replyv.Interface())
+	var errMsg string
+	errRet := returnValues[0].Interface()
+	if errRet != nil {
+		errMsg = errRet.(error).Error()
 	}
-
-	val, ok := load.(reflect.Value)
-	if !ok {
-		return errors.New("val type is not reflect.Value")
-	}
-
-	result := val.
-		MethodByName(fn).
-		Call([]reflect.Value{reflect.ValueOf(param), reflect.ValueOf(res)})
-	if err := result[0].Interface(); err != nil {
-		return errors.New("call func error: " + err.(error).Error())
-	}
-
-	return nil
+	srv.sendResponse(sendLock, req, c, replyv.Interface(), errMsg)
+	req.Reset()
+	srv.reqPool.Put(req)
 }

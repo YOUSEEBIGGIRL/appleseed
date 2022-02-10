@@ -1,7 +1,7 @@
-package easyrpc
+package appleseed
 
 type Param struct {
-	Str string
+	Str  string
 	X, Y int64
 }
 
@@ -10,7 +10,7 @@ type Res struct {
 	Add int64
 }
 
-type Cal struct {}
+type Cal struct{}
 
 func (c *Cal) Add(param *Param, res *Res) error {
 	res.Add = param.X + param.Y
