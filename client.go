@@ -1,12 +1,15 @@
 package appleseed
 
 import (
+	"context"
 	"errors"
-	"github.com/YOUSEEBIGGIRL/appleseed/codec"
 	"io"
 	"log"
 	"net"
 	"sync"
+	"time"
+
+	"github.com/YOUSEEBIGGIRL/appleseed/codec"
 )
 
 type Client struct {
@@ -124,7 +127,7 @@ func (c *Client) recv() {
 	}
 }
 
-func (c *Client) Go(serviceMethod string, arg, reply any, done chan *Call) *Call {
+func (c *Client) Go(ctx context.Context, serviceMethod string, arg, reply any, done chan *Call) *Call {
 	call := new(Call)
 	call.ServiceMethod = serviceMethod
 	call.Args = arg
@@ -137,12 +140,24 @@ func (c *Client) Go(serviceMethod string, arg, reply any, done chan *Call) *Call
 		}
 	}
 	call.Done = done
+
+	select {
+	case <-ctx.Done():
+		log.Println("time out")
+		call.Error = errors.New("rpc call error: time out")
+		call.done()
+		return call
+	default:
+	}
+
 	c.send(call)
+
 	return call
 }
 
-func (c *Client) Call(serviceMethod string, arg, reply any) error {
-	call := <-c.Go(serviceMethod, arg, reply, make(chan *Call, 1)).Done
+func (c *Client) Call(ctx context.Context, serviceMethod string, arg, reply any) error {
+	call := <-c.Go(ctx, serviceMethod, arg, reply, make(chan *Call, 1)).Done
+	log.Println(call)
 	return call.Error
 }
 
@@ -153,4 +168,13 @@ func Dial(network, addr string) (*Client, error) {
 	}
 	cli := NewClient(conn)
 	return cli, nil
+}
+
+func DialTimeout(network, addr string, timeout time.Duration) (c *Client, err error) {
+	conn, err := net.DialTimeout(network, addr, timeout)
+	if err != nil {
+		return nil, err
+	}
+	c = NewClient(conn)
+	return
 }

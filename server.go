@@ -3,7 +3,6 @@ package appleseed
 import (
 	"errors"
 	"fmt"
-	"github.com/YOUSEEBIGGIRL/appleseed/codec"
 	"go/token"
 	"io"
 	"log"
@@ -11,11 +10,17 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+
+	"github.com/YOUSEEBIGGIRL/appleseed/codec"
+	reuseport "github.com/kavu/go_reuseport"
 )
 
 // 发生错误时，将该空结构体作为 body 发送
-var invalidRequest = struct{}{}
-var typeOfError = reflect.TypeOf((*error)(nil)).Elem()
+var (
+	invalidRequest = struct{}{}
+	typeOfError    = reflect.TypeOf((*error)(nil)).Elem()
+	DefaultServer  = NewServer()
+)
 
 type Server struct {
 	registerService sync.Map
@@ -33,6 +38,10 @@ func NewServer() *Server {
 			New: func() any { return &codec.ResponseHeader{} },
 		},
 	}
+}
+
+func Register(struct_ any) error {
+	return DefaultServer.Register(struct_)
 }
 
 func (s *Server) Register(struct_ any) error {
@@ -70,7 +79,7 @@ func (s *Server) Register(struct_ any) error {
 	if len(srv.methods) == 0 {
 		str := ""
 		// To help the user, see if a pointer receiver would work.
-		method := suitableMethods(reflect.PointerTo(stype))
+		method := suitableMethods(reflect.PtrTo(stype))
 		if len(method) != 0 {
 			str = "rpc.Register: type " + sname + " has no exported methods of suitable type (hint: pass a pointer to value of that type)"
 		} else {
@@ -119,7 +128,7 @@ func suitableMethods(typ reflect.Type) map[string]*MethodInfo {
 
 		// 标准格式的 func 第二个参数（response）必须为指针类型
 		replyType := mt.In(2)
-		if replyType.Kind() != reflect.Pointer {
+		if replyType.Kind() != reflect.Ptr {
 			log.Printf("rpc.Register: reply type of method %q is not a pointer: %q\n", mname, replyType)
 			continue
 		}
@@ -145,7 +154,7 @@ func suitableMethods(typ reflect.Type) map[string]*MethodInfo {
 
 // isExportedOriBuiltinType 检测 t 是否是可导出类型或者基本类型？
 func isExportedOrBuiltinType(t reflect.Type) bool {
-	if t.Kind() == reflect.Pointer {
+	if t.Kind() == reflect.Ptr {
 		t = t.Elem()
 	}
 	// PkgPath 返回包名，代表这个包的唯一标识符，所以可能是单一的包名，或者 encoding/base64。
@@ -154,9 +163,13 @@ func isExportedOrBuiltinType(t reflect.Type) bool {
 	return token.IsExported(t.Name()) || t.PkgPath() == ""
 }
 
+func RunWithTCP(host, port string) error {
+	return DefaultServer.RunWithTCP(host, port)
+}
+
 func (s *Server) RunWithTCP(host, port string) error {
-	//listen, err := reuseport.Listen("tcp", fmt.Sprintf("%s:%s", host, port))
-	listen, err := net.Listen("tcp", fmt.Sprintf("%s:%s", host, port))
+	listen, err := reuseport.Listen("tcp", fmt.Sprintf("%s:%s", host, port))
+	//listen, err := net.Listen("tcp", fmt.Sprintf("%s:%s", host, port))
 	if err != nil {
 		return err
 	}
@@ -261,7 +274,7 @@ func (s *Server) readRequest(c codec.ServerCodec) (service *service, mtype *Meth
 
 	var isValue bool
 	// 构造 arg 和 reply
-	if mtype.ArgType.Kind() == reflect.Pointer {
+	if mtype.ArgType.Kind() == reflect.Ptr {
 		// reflect.New() 会创建一个表示指向指定类型的新零值的指针
 		// 比如如果传入的 reflect.Type 是 int64，那么会返回一个 *int64
 		// 如果传入的是 *int64，那么会返回一个 **int64
