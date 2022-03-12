@@ -5,7 +5,7 @@ import (
 )
 
 func TestRegisterStruct(t *testing.T) {
-	new(Server).Register(new(XXX))
+	//new(Server).Register(new(XXX))
 }
 
 func TestCall(t *testing.T) {

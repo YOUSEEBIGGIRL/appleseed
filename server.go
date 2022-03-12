@@ -1,6 +1,7 @@
 package appleseed
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"go/token"
@@ -12,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/YOUSEEBIGGIRL/appleseed/codec"
+	"github.com/YOUSEEBIGGIRL/appleseed/registry"
 	reuseport "github.com/kavu/go_reuseport"
 )
 
@@ -19,7 +21,6 @@ import (
 var (
 	invalidRequest = struct{}{}
 	typeOfError    = reflect.TypeOf((*error)(nil)).Elem()
-	DefaultServer  = NewServer()
 )
 
 type Server struct {
@@ -28,23 +29,23 @@ type Server struct {
 	wg              sync.WaitGroup
 	reqPool         *sync.Pool
 	respPool        *sync.Pool
+	reg             registry.Server
+	addr            string
 }
 
-func NewServer() *Server {
-	return &Server{
-		reqPool: &sync.Pool{
-			New: func() any { return &codec.RequestHeader{} }},
-		respPool: &sync.Pool{
-			New: func() any { return &codec.ResponseHeader{} },
-		},
+func NewServer(host, port string, reg registry.Server) *Server {
+	if reg == nil {
+		panic("register is nil")
 	}
+	s := &Server{}
+	s.reg = reg
+	s.reqPool = &sync.Pool{New: func() any { return &codec.RequestHeader{} }}
+	s.respPool = &sync.Pool{New: func() any { return &codec.ResponseHeader{} }}
+	s.addr = fmt.Sprintf("%s:%s", host, port)
+	return s
 }
 
-func Register(struct_ any) error {
-	return DefaultServer.Register(struct_)
-}
-
-func (s *Server) Register(struct_ any) error {
+func (s *Server) Register(ctx context.Context, struct_ any, serviceName string) error {
 	// 检查 struct_ 是否是一个 struct
 	kind := reflect.TypeOf(struct_).Kind()
 	if kind == reflect.Ptr {
@@ -92,7 +93,10 @@ func (s *Server) Register(struct_ any) error {
 	if _, ok := s.registerService.LoadOrStore(sname, srv); ok {
 		return errors.New("该结构体已经注册")
 	}
-	log.Println(sname, "register ok")
+	// 同时添加到注册中心
+	s.reg.Register(ctx, serviceName, s.addr)
+	log.Printf("register [structName:%s, serviceName:%s] to [%s:%v] success, register info: [key:%v value: %v]\n",
+		sname, serviceName, s.reg.Name(), s.reg.Addr(), serviceName, s.addr)
 	return nil
 }
 
@@ -163,12 +167,8 @@ func isExportedOrBuiltinType(t reflect.Type) bool {
 	return token.IsExported(t.Name()) || t.PkgPath() == ""
 }
 
-func RunWithTCP(host, port string) error {
-	return DefaultServer.RunWithTCP(host, port)
-}
-
-func (s *Server) RunWithTCP(host, port string) error {
-	listen, err := reuseport.Listen("tcp", fmt.Sprintf("%s:%s", host, port))
+func (s *Server) RunWithTCP() error {
+	listen, err := reuseport.Listen("tcp", s.addr)
 	//listen, err := net.Listen("tcp", fmt.Sprintf("%s:%s", host, port))
 	if err != nil {
 		return err

@@ -1,4 +1,4 @@
-package appleseed
+package registry
 
 import (
 	"context"
@@ -7,10 +7,10 @@ import (
 	"time"
 )
 
-var registry *Registry
+var registry *Etcd
 
 func init() {
-	r, err := NewRegistry(context.Background(), []string{"127.0.0.1:2379"}, "", 5)
+	r, err := NewEtcd(context.Background(), []string{"127.0.0.1:2379"}, "", 5)
 	if err != nil {
 		panic(err)
 	}
@@ -19,7 +19,8 @@ func init() {
 }
 
 func TestRegister(t *testing.T) {
-	ctx, _ := context.WithTimeout(context.Background(), time.Second*3)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
+	defer cancel()
 	if err := registry.Register(ctx, "service1", "127.0.0.1:8080"); err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +30,8 @@ func TestRegister(t *testing.T) {
 }
 
 func TestGet(t *testing.T) {
-	ctx, _ := context.WithTimeout(context.Background(), time.Second*3)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
+	defer cancel()
 	addrs, err := registry.Get(ctx, "service1")
 	if err != nil {
 		t.Fatal(err)

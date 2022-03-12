@@ -10,13 +10,13 @@ func init() {
 }
 
 func TestServer(t *testing.T) {
-	server := NewServer()
-	if err := server.Register(new(XXX)); err != nil {
-		log.Fatalln(err)
-	}
-	if err := server.RunWithTCP("localhost", "8080"); err != nil {
-		log.Fatalln(err)
-	}
+	// server := NewServer()
+	// if err := server.Register(new(XXX)); err != nil {
+	// 	log.Fatalln(err)
+	// }
+	// if err := server.RunWithTCP("localhost", "8080"); err != nil {
+	// 	log.Fatalln(err)
+	// }
 }
 
 //func TestClient(t *testing.T) {
