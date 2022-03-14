@@ -1,9 +1,10 @@
 package loadbalance
 
+var addrsIndex int64 // 用于轮询
+
 type RoundRobin struct {
 	addrs           []string
 	addrsWithWeight map[string]*weightInfo
-	addrsIndex      int64 // 用于轮询
 }
 
 // weightInfo 平滑加权轮询需要该 struct 来保存一些信息
@@ -18,11 +19,11 @@ func (r *RoundRobin) Get() (addr string) {
 		return ""
 	}
 	l := len(r.addrs)
-	if r.addrsIndex == int64(l) {
-		r.addrsIndex = 0
+	if addrsIndex == int64(l) {
+		addrsIndex = 0
 	}
-	addr = r.addrs[r.addrsIndex]
-	r.addrsIndex++
+	addr = r.addrs[addrsIndex]
+	addrsIndex++
 	return
 }
 

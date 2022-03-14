@@ -94,7 +94,9 @@ func (s *Server) Register(ctx context.Context, struct_ any, serviceName string) 
 		return errors.New("该结构体已经注册")
 	}
 	// 同时添加到注册中心
-	s.reg.Register(ctx, serviceName, s.addr)
+	if err := s.reg.Register(ctx, serviceName, s.addr); err != nil {
+		return err
+	}
 	log.Printf("register [structName:%s, serviceName:%s] to [%s:%v] success, register info: [key:%v value: %v]\n",
 		sname, serviceName, s.reg.Name(), s.reg.Addr(), serviceName, s.addr)
 	return nil

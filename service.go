@@ -7,7 +7,8 @@ import (
 	"sync"
 )
 
-// service 可以理解为是一个 struct
+// service 可以理解为是一个对象，它的方法被会被注册到 rpc 中，客户可以调用通过 "对象.方法"
+// 的形式来进行 rpc 调用
 type service struct {
 	name    string
 	typ     reflect.Type

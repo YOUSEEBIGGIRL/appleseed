@@ -16,18 +16,20 @@ import (
 
 func GetServerAddr(ctx context.Context, reg registry.Client, lb loadbalance.Balancer, servicePrefix, serviceName string) (addr string, err error) {
 	key := path.Join(servicePrefix, serviceName)
+	//log.Println(key)
 	// 从注册中心中获取 serviceName 的所有地址
 	addrs, err := reg.Get(ctx, key)
 	if err != nil {
 		return
 	}
 	if len(addrs) == 0 {
-		return "", fmt.Errorf("this service[%v] no address!", key)	
+		return "", fmt.Errorf("this service[%v] no address", key)
 	}
 	//log.Println(addrs)
 	// 通过负载均衡选择其中的一个
 	lb.SetAddrs(addrs)
 	addr = lb.Get()
+	//log.Println(addr)
 	return
 }
 
@@ -176,24 +178,6 @@ func (c *Client) Go(ctx context.Context, serviceMethod string, arg, reply any, d
 
 func (c *Client) Call(ctx context.Context, serviceMethod string, arg, reply any) error {
 	call := <-c.Go(ctx, serviceMethod, arg, reply, make(chan *Call, 1)).Done
-	log.Println(call)
+	//log.Println(call)
 	return call.Error
 }
-
-// func (c *Client) Dial(network, addr string) (*Client, error) {
-// 	conn, err := net.Dial(network, addr)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	cli := NewClient(conn)
-// 	return cli, nil
-// }
-
-// func DialTimeout(network, addr string, timeout time.Duration) (c *Client, err error) {
-// 	conn, err := net.DialTimeout(network, addr, timeout)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	c = NewClient(conn)
-// 	return
-// }
