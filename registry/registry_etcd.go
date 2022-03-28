@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"github.com/YOUSEEBIGGIRL/appleseed/loadbalance"
 	"log"
 	"path"
 
@@ -22,7 +23,7 @@ type Etcd struct {
 	lease         *client.LeaseGrantResponse
 }
 
-// NewRegistry 创建一个注册中心，etcdEndpoints 指定 etcd 的地址，prefix 表示公共前缀，
+// NewEtcd 创建一个注册中心，etcdEndpoints 指定 etcd 的地址，prefix 表示公共前缀，
 // 方便查找和分类，如果不指定则使用默认前缀，格式为：<prefix>/<serviceName>/<uuid>，
 // keepAliveTimeout 表示超时时间，如果超过该时间没有发送心跳，则说明此服务器已下线
 func NewEtcd(ctx context.Context, endpoints []string, prefix string, keepAliveTimeout int64) (r *Etcd, err error) {
@@ -54,7 +55,24 @@ func NewEtcd(ctx context.Context, endpoints []string, prefix string, keepAliveTi
 	}
 	r.lease = lease
 	// 对租约进行永久保活
-	l.KeepAlive(ctx, lease.ID)
+	ch, err := l.KeepAlive(ctx, lease.ID)
+	if err != nil {
+		log.Println("set keepalive error: ", err)
+		return nil, err
+	}
+	go func() {
+		// keepAlive 的 response 需要消费掉，不然 etcd 日志会一直警告：keepalive 缓存队列已满，新的 response 将被丢弃
+		for range ch {
+		}
+	}()
+
+	go func() {
+		if err_ := r.Watch(context.Background(), "service1", &loadbalance.RoundRobin{}); err != nil {
+			err = err_
+			return
+		}
+	}()
+
 	return
 }
 
@@ -108,4 +126,32 @@ func (e *Etcd) Get(ctx context.Context, serviceName string) (addrs []string, err
 		addrs = append(addrs, string(v.Value))
 	}
 	return
+}
+
+func (e *Etcd) Watch(ctx context.Context, serviceName string, lo loadbalance.Balancer) error {
+	watchChan := e.conn.Watch(ctx, path.Join(e.prefix, serviceName), client.WithPrefix(), client.WithPrevKV())
+	for {
+		select {
+		case resp := <-watchChan:
+			for _, event := range resp.Events {
+				switch event.Type {
+				case client.EventTypePut:
+					if event.IsCreate() { // 新的 key
+						log.Printf("watch a new key[key=%s, val=%s] put\n", event.Kv.Key, event.Kv.Value)
+						lo.Add(string(event.Kv.Value))
+					} else if event.IsModify() { // 已存在的 key 的 val 发生了变化
+						log.Printf("watch a key update[key=%s, new val=%s]\n", event.Kv.Key, event.Kv.Value)
+						if err := lo.Update(string(event.PrevKv.Value), string(event.Kv.Value)); err != nil {
+							return err
+						}
+					}
+				case client.EventTypeDelete:
+					log.Printf("watch a key[key=%s, val=%s] delete\n", event.Kv.Key, event.Kv.Value)
+					if err := lo.Delete(string(event.Kv.Value)); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
 }

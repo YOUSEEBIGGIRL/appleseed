@@ -1,9 +1,16 @@
 package loadbalance
 
+import (
+	"fmt"
+	"log"
+)
+
 var addrsIndex int64 // 用于轮询
 
 type RoundRobin struct {
-	addrs           []string
+	addrs []string
+	// key 是地址，val 是该地址在 addrs 中的 index，该字段用于 addrs 的更新和删除操作
+	addrsMap        map[string]int64
 	addrsWithWeight map[string]*weightInfo
 }
 
@@ -61,9 +68,9 @@ func (r *RoundRobin) AddrsWithWeight() (m map[string]int64) {
 }
 
 // SetAddrs 设置 addrs
-func (r *RoundRobin) SetAddrs(addrs []string) {
-	r.addrs = addrs
-}
+//func (r *RoundRobin) SetAddrs(addrs []string) {
+//	r.addrs = addrs
+//}
 
 // SetAddrsWithWeight 设置 addrsWithWeight
 func (r *RoundRobin) SetAddrsWithWeight(addrsWithWeight map[string]int64) {
@@ -73,4 +80,41 @@ func (r *RoundRobin) SetAddrsWithWeight(addrsWithWeight map[string]int64) {
 	for addr, weight := range addrsWithWeight {
 		r.addrsWithWeight[addr] = &weightInfo{weight: weight, addr: addr}
 	}
+}
+
+func (r *RoundRobin) Add(addr string) {
+	if r.addrsMap == nil {
+		r.addrsMap = make(map[string]int64)
+	}
+	r.addrs = append(r.addrs, addr)
+	r.addrsMap[addr] = int64(len(r.addrs) - 1)
+}
+
+func (r *RoundRobin) Update(oldAddr string, newAddr string) error {
+	if r.addrsMap == nil {
+		r.addrsMap = make(map[string]int64)
+	}
+	index, ok := r.addrsMap[oldAddr]
+	if !ok {
+		log.Printf("not found %v", oldAddr)
+		return fmt.Errorf("not found %v", oldAddr)
+	}
+	r.addrs[index] = newAddr
+	delete(r.addrsMap, oldAddr)
+	r.addrsMap[newAddr] = index
+	return nil
+}
+
+func (r *RoundRobin) Delete(addr string) error {
+	if r.addrsMap == nil {
+		r.addrsMap = make(map[string]int64)
+	}
+	index, ok := r.addrsMap[addr]
+	if !ok {
+		log.Printf("not found %v", addr)
+		return fmt.Errorf("not found %v", addr)
+	}
+	r.addrs = append(r.addrs[:index], r.addrs[index+1:]...)
+	delete(r.addrsMap, addr)
+	return nil
 }

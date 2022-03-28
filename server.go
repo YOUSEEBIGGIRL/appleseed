@@ -33,7 +33,7 @@ type Server struct {
 	addr            string
 }
 
-func NewServer(host, port string, reg registry.Server) *Server {
+func NewServer(ctx context.Context, serviceName, host, port string, reg registry.Server) (*Server, error) {
 	if reg == nil {
 		panic("register is nil")
 	}
@@ -42,10 +42,16 @@ func NewServer(host, port string, reg registry.Server) *Server {
 	s.reqPool = &sync.Pool{New: func() any { return &codec.RequestHeader{} }}
 	s.respPool = &sync.Pool{New: func() any { return &codec.ResponseHeader{} }}
 	s.addr = fmt.Sprintf("%s:%s", host, port)
-	return s
+	// 同时添加到注册中心
+	if err := s.reg.Register(ctx, serviceName, s.addr); err != nil {
+		return nil, err
+	}
+	log.Printf("register [serviceName:%s] to [%s:%v] success, register info: [key:%v value: %v]\n",
+		serviceName, s.reg.Name(), s.reg.Addr(), serviceName, s.addr)
+	return s, nil
 }
 
-func (s *Server) Register(ctx context.Context, struct_ any, serviceName string) error {
+func (s *Server) Register(struct_ any) error {
 	// 检查 struct_ 是否是一个 struct
 	kind := reflect.TypeOf(struct_).Kind()
 	if kind == reflect.Ptr {
@@ -93,12 +99,6 @@ func (s *Server) Register(ctx context.Context, struct_ any, serviceName string) 
 	if _, ok := s.registerService.LoadOrStore(sname, srv); ok {
 		return errors.New("该结构体已经注册")
 	}
-	// 同时添加到注册中心
-	if err := s.reg.Register(ctx, serviceName, s.addr); err != nil {
-		return err
-	}
-	log.Printf("register [structName:%s, serviceName:%s] to [%s:%v] success, register info: [key:%v value: %v]\n",
-		sname, serviceName, s.reg.Name(), s.reg.Addr(), serviceName, s.addr)
 	return nil
 }
 

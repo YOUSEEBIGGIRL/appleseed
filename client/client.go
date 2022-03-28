@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"path"
 	"sync"
 
 	"github.com/YOUSEEBIGGIRL/appleseed/codec"
@@ -14,39 +13,40 @@ import (
 	"github.com/YOUSEEBIGGIRL/appleseed/registry"
 )
 
-func GetServerAddr(ctx context.Context, reg registry.Client, lb loadbalance.Balancer, servicePrefix, serviceName string) (addr string, err error) {
-	key := path.Join(servicePrefix, serviceName)
-	//log.Println(key)
+func GetServerAddr(ctx context.Context, reg registry.Client, lb loadbalance.Balancer, serviceName string) (addr string, err error) {
 	// 从注册中心中获取 serviceName 的所有地址
-	addrs, err := reg.Get(ctx, key)
+	addrs, err := reg.Get(ctx, serviceName)
 	if err != nil {
 		return
 	}
 	if len(addrs) == 0 {
-		return "", fmt.Errorf("this service[%v] no address", key)
+		return "", fmt.Errorf("this service[%v] no address", serviceName)
 	}
-	//log.Println(addrs)
+
+	for _, addr := range addrs {
+		lb.Add(addr)
+	}
 	// 通过负载均衡选择其中的一个
-	lb.SetAddrs(addrs)
 	addr = lb.Get()
-	//log.Println(addr)
 	return
 }
 
 type Client struct {
 	//reqMu     sync.Mutex // 似乎没什么用，一把锁足以
-	codec     codec.ClientCodec
-	request   codec.RequestHeader
-	mu        sync.Mutex       // 保护 pending
-	globalSeq uint64           // 为 request 分配 seq
-	pending   map[uint64]*Call // 保存所有请求，请求完成后，会进行移除
-	closing   bool             // user has called Close
-	shutdown  bool             // server has told us to stop
+	codec      codec.ClientCodec
+	request    codec.RequestHeader
+	mu         sync.Mutex       // 保护 pending
+	globalSeq  uint64           // 为 request 分配 seq
+	pending    map[uint64]*Call // 保存所有请求，请求完成后，会进行移除
+	serverAddr string           // 当前调用的服务的地址，如果 watch 到该地址下线或者变更，可以进行相应的处理
+	closing    bool             // user has called Close
+	shutdown   bool             // server has told us to stop
 }
 
-func NewClient(conn io.ReadWriteCloser) *Client {
+func NewClient(conn io.ReadWriteCloser, serverAddr string) *Client {
 	cc := codec.NewGobClientCodec(conn)
 	c := newClientWithCodec(cc)
+	c.serverAddr = serverAddr
 	return c
 }
 
@@ -178,6 +178,5 @@ func (c *Client) Go(ctx context.Context, serviceMethod string, arg, reply any, d
 
 func (c *Client) Call(ctx context.Context, serviceMethod string, arg, reply any) error {
 	call := <-c.Go(ctx, serviceMethod, arg, reply, make(chan *Call, 1)).Done
-	//log.Println(call)
 	return call.Error
 }

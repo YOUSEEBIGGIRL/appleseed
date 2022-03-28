@@ -44,8 +44,11 @@ func TestRpcServer(t *testing.T) {
 	if err != nil {
 		t.Fatal("new etcd error: ", err)
 	}
-	s := NewServer("127.0.0.1", "8880", reg)
-	if err := s.Register(context.Background(), new(XXX), "service1"); err != nil {
+	s, err := NewServer(context.Background(), "service1", "127.0.0.1", "8880", reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Register(new(XXX)); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.RunWithTCP(); err != nil {
@@ -59,8 +62,8 @@ func TestRpcClient(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	prefix := "/register-servier"
-	addr, err := client.GetServerAddr(context.Background(), reg, &loadbalance.RoundRobin{}, prefix, "service1")
+	//prefix := "/register-servier"
+	addr, err := client.GetServerAddr(context.Background(), reg, &loadbalance.RoundRobin{}, "/register-servierservice1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +73,8 @@ func TestRpcClient(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cli := client.NewClient(conn)
+	cli := client.NewClient(conn, addr)
+
 	arg := &Args{Str: "abc", X: 10, Y: 20}
 	var reply Reply
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
@@ -94,8 +98,8 @@ func TestClientTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	prefix := "/register-servier"
-	addr, err := client.GetServerAddr(context.Background(), reg, &loadbalance.RoundRobin{}, prefix, "service1")
+	//prefix := "/register-servier"
+	addr, err := client.GetServerAddr(context.Background(), reg, &loadbalance.RoundRobin{}, "/register-servier/service1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +109,7 @@ func TestClientTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cli := client.NewClient(conn)
+	cli := client.NewClient(conn, addr)
 
 	arg := &Args{RunTime: time.Minute}
 	rep := &Reply{}
@@ -142,8 +146,12 @@ func TestLoadBalanceServer(t *testing.T) {
 	// simulate three servers to provide the same service
 	go func() {
 		defer wg.Done()
-		s := NewServer("127.0.0.1", "8880", reg)
-		if err := s.Register(context.Background(), new(XXX), "service1"); err != nil {
+		s, err := NewServer(context.Background(), "service1", "127.0.0.1", "8880", reg)
+		if err != nil {
+			fmt.Printf("new server error: %v\n", err)
+			return
+		}
+		if err := s.Register(new(XXX)); err != nil {
 			fmt.Printf("register error: %v\n", err)
 			return
 		}
@@ -155,8 +163,12 @@ func TestLoadBalanceServer(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		s := NewServer("127.0.0.1", "8881", reg)
-		if err := s.Register(context.Background(), new(XXX), "service1"); err != nil {
+		s, err := NewServer(context.Background(), "service1", "127.0.0.1", "8880", reg)
+		if err != nil {
+			fmt.Printf("new server error: %v\n", err)
+			return
+		}
+		if err := s.Register(new(XXX)); err != nil {
 			fmt.Printf("register error: %v\n", err)
 			return
 		}
@@ -168,8 +180,12 @@ func TestLoadBalanceServer(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		s := NewServer("127.0.0.1", "8882", reg)
-		if err := s.Register(context.Background(), new(XXX), "service1"); err != nil {
+		s, err := NewServer(context.Background(), "service1", "127.0.0.1", "8880", reg)
+		if err != nil {
+			fmt.Printf("new server error: %v\n", err)
+			return
+		}
+		if err := s.Register(new(XXX)); err != nil {
 			fmt.Printf("register error: %v\n", err)
 			return
 		}
@@ -189,8 +205,8 @@ func TestLoadBalanceClient(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		prefix := "/register-servier"
-		addr, err := client.GetServerAddr(context.Background(), reg, &loadbalance.RoundRobin{}, prefix, "service1")
+		//prefix := "/register-servier"
+		addr, err := client.GetServerAddr(context.Background(), reg, &loadbalance.RoundRobin{}, "/register-servier/service1")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -201,7 +217,7 @@ func TestLoadBalanceClient(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		cli := client.NewClient(conn)
+		cli := client.NewClient(conn, addr)
 		arg := &Args{Str: "abc", X: 10, Y: 20}
 		var reply Reply
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
@@ -235,10 +251,10 @@ func TestRpcClientWithGoroutine(t *testing.T) {
 				return
 			}
 
-			prefix := "/register-servier"
+			//prefix := "/register-servier"
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
 			defer cancel()
-			addr, err := client.GetServerAddr(ctx, reg, &loadbalance.RoundRobin{}, prefix, "service1")
+			addr, err := client.GetServerAddr(ctx, reg, &loadbalance.RoundRobin{}, "/register-servier/service1")
 			if err != nil {
 				t.Error(err)
 				return
@@ -250,7 +266,7 @@ func TestRpcClientWithGoroutine(t *testing.T) {
 				return
 			}
 
-			cli := client.NewClient(conn)
+			cli := client.NewClient(conn, addr)
 			ctx1, cancel := context.WithTimeout(context.Background(), time.Second*3)
 			defer cancel()
 			for j := 0; j < 10; j++ {
