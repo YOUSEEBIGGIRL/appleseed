@@ -24,7 +24,7 @@ var (
 )
 
 type Server struct {
-	registerService sync.Map
+	registerService sync.Map // key: string val: type struct service
 	sendMu          sync.Mutex
 	wg              sync.WaitGroup
 	reqPool         *sync.Pool
@@ -308,7 +308,7 @@ func (s *Server) readRequest(c codec.ServerCodec) (service *service, mtype *Meth
 	return
 }
 
-func (s *Server) sendResponse(sendLock *sync.Mutex, req *codec.RequestHeader, c codec.ServerCodec, reply interface{}, errMsg string) {
+func (s *Server) sendResponse(sendLock *sync.Mutex, req *codec.RequestHeader, c codec.ServerCodec, reply any, errMsg string) {
 	respHeader := s.respPool.Get().(*codec.ResponseHeader)
 	respHeader.ServiceMethod = req.ServiceMethod
 	respHeader.Seq = req.Seq

@@ -117,7 +117,11 @@ func (c *Client) recv() {
 		c.mu.Unlock()
 
 		switch {
+		// 源码里对这一情况也进行了判断，但是注释用机翻完全看不懂，seq 既然是从 response
+		// 中获取的，那么怎么可能在 pending 中找不到呢？
+		case call == nil:
 		case resp.Error != "":
+			call.Error = errors.New(resp.Error)
 			// 虽然发生了错误，但是仍然需要将连接中的剩余数据（body）消费掉
 			// 如果 gob.Decode() 传入的是 nil，那么 gob 会读取连接中的一个值并
 			// 将该值丢弃，比如 conn 中使用 gob 序列化了 a，b 两个对象，此时
@@ -126,7 +130,6 @@ func (c *Client) recv() {
 			if err := c.codec.ReadResponseBody(nil); err != nil {
 				call.Error = err
 			}
-			call.Error = errors.New(resp.Error)
 			call.done()
 		default:
 			if err := c.codec.ReadResponseBody(call.Reply); err != nil {
@@ -135,7 +138,7 @@ func (c *Client) recv() {
 			call.done()
 		}
 	}
-	// 发生了 err
+	// 如果流程走到这里，说明发生了 err
 	c.mu.Lock()
 	c.shutdown = true
 	// 连接中没有数据可读了，这种情况可能是服务端已经下线了
