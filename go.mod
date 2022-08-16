@@ -1,4 +1,4 @@
-module github.com/YOUSEEBIGGIRL/appleseed
+module github.com/autsu/appleseed
 
 go 1.18
 

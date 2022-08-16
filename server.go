@@ -12,8 +12,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/YOUSEEBIGGIRL/appleseed/codec"
-	"github.com/YOUSEEBIGGIRL/appleseed/registry"
+	"github.com/autsu/appleseed/codec"
+	"github.com/autsu/appleseed/registry"
 	reuseport "github.com/kavu/go_reuseport"
 )
 

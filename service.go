@@ -1,7 +1,7 @@
 package appleseed
 
 import (
-	"github.com/YOUSEEBIGGIRL/appleseed/codec"
+	"github.com/autsu/appleseed/codec"
 	"log"
 	"reflect"
 	"sync"

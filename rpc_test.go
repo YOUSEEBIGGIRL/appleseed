@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/YOUSEEBIGGIRL/appleseed/client"
-	"github.com/YOUSEEBIGGIRL/appleseed/loadbalance"
-	"github.com/YOUSEEBIGGIRL/appleseed/registry"
+	"github.com/autsu/appleseed/client"
+	"github.com/autsu/appleseed/loadbalance"
+	"github.com/autsu/appleseed/registry"
 )
 
 type Args struct {

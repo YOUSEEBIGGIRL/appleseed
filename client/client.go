@@ -8,9 +8,9 @@ import (
 	"log"
 	"sync"
 
-	"github.com/YOUSEEBIGGIRL/appleseed/codec"
-	"github.com/YOUSEEBIGGIRL/appleseed/loadbalance"
-	"github.com/YOUSEEBIGGIRL/appleseed/registry"
+	"github.com/autsu/appleseed/codec"
+	"github.com/autsu/appleseed/loadbalance"
+	"github.com/autsu/appleseed/registry"
 )
 
 func GetServerAddr(ctx context.Context, reg registry.Client, lb loadbalance.Balancer, serviceName string) (addr string, err error) {

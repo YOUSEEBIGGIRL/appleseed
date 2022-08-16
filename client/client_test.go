@@ -2,10 +2,11 @@ package client
 
 import (
 	"context"
-	"github.com/YOUSEEBIGGIRL/appleseed/loadbalance"
-	"github.com/YOUSEEBIGGIRL/appleseed/registry"
+	"github.com/autsu/appleseed/loadbalance"
+	"github.com/autsu/appleseed/registry"
 	"log"
 	"testing"
+	"time"
 )
 
 func TestGetServerAddr(t *testing.T) {
@@ -15,9 +16,11 @@ func TestGetServerAddr(t *testing.T) {
 	}
 
 	prefix := "/register-servier"
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
+	defer cancel()
 
 	for i := 0; i < 1000; i++ {
-		addr, err := GetServerAddr(context.Background(), reg, &loadbalance.RoundRobin{}, prefix, "service1")
+		addr, err := GetServerAddr(ctx, reg, &loadbalance.RoundRobin{}, prefix+"/service1")
 		if err != nil {
 			t.Fatal(err)
 		}

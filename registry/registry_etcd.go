@@ -2,7 +2,7 @@ package registry
 
 import (
 	"context"
-	"github.com/YOUSEEBIGGIRL/appleseed/loadbalance"
+	"github.com/autsu/appleseed/loadbalance"
 	"log"
 	"path"
 
