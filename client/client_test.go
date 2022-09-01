@@ -26,5 +26,4 @@ func TestGetServerAddr(t *testing.T) {
 		}
 		log.Printf("get server addr: %v\n", addr)
 	}
-
 }

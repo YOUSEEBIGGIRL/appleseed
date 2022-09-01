@@ -41,5 +41,5 @@ func (s *service) call(srv *Server, sendLock *sync.Mutex, wg *sync.WaitGroup, me
 	}
 	srv.sendResponse(sendLock, req, c, replyv.Interface(), errMsg)
 	req.Reset()
-	srv.reqPool.Put(req)
+	srv.reqPool.Free(req)
 }

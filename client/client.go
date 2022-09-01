@@ -33,14 +33,14 @@ func GetServerAddr(ctx context.Context, reg registry.Client, lb loadbalance.Bala
 
 type Client struct {
 	//reqMu     sync.Mutex // 似乎没什么用，一把锁足以
-	codec      codec.ClientCodec
-	request    codec.RequestHeader
-	mu         sync.Mutex       // 保护 pending
-	globalSeq  uint64           // 为 request 分配 seq
-	pending    map[uint64]*Call // 保存所有请求，请求完成后，会进行移除
-	serverAddr string           // 当前调用的服务的地址，如果 watch 到该地址下线或者变更，可以进行相应的处理
-	closing    bool             // user has called Close
-	shutdown   bool             // server has told us to stop
+	codec         codec.ClientCodec
+	requestHeader codec.RequestHeader
+	mu            sync.Mutex       // 保护 pending
+	globalSeq     uint64           // 为 requestHeader 分配 seq
+	pending       map[uint64]*Call // 保存所有请求，请求完成后，会进行移除
+	serverAddr    string           // 当前调用的服务的地址，如果 watch 到该地址下线或者变更，可以进行相应的处理
+	closing       bool             // user has called Close
+	shutdown      bool             // server has told us to stop
 }
 
 func NewClient(conn io.ReadWriteCloser, serverAddr string) *Client {
@@ -86,9 +86,9 @@ func (c *Client) send(call *Call) {
 	c.pending[seq] = call
 	c.mu.Unlock()
 
-	c.request.Seq = seq
-	c.request.ServiceMethod = call.ServiceMethod
-	if err := c.codec.WriteRequest(&c.request, call.Args); err != nil {
+	c.requestHeader.Seq = seq
+	c.requestHeader.ServiceMethod = call.ServiceMethod
+	if err := c.codec.WriteRequest(&c.requestHeader, call.Args); err != nil {
 		c.mu.Lock()
 		call := c.pending[seq]
 		delete(c.pending, seq)
@@ -119,7 +119,28 @@ func (c *Client) recv() {
 		switch {
 		// 源码里对这一情况也进行了判断，但是注释用机翻完全看不懂，seq 既然是从 response
 		// 中获取的，那么怎么可能在 pending 中找不到呢？
+		//
+		// 想了一下，可能是这个原因：send 中是先写入 seq 到 pending 中，再通过网络发送请求，
+		// 但是网络发送可能会出现错误，此时便会将这个 seq 从 pending 中移除，就可能出
+		// 现 pending 中不存在这个 seq，所以值就为 nil。
+		//
+		// 至于为什么 recv 这边能读到 seq，可能是因为 WriteRequest 是先写入请求头，再写入
+		// 请求体，所以可能请求头写入成功（里面有 seq），但是请求体写入失败，此时请求体已经发送
+		// 给对方了，但是 WriteRequest 因为请求体写入失败而返回 err，导致这个 seq 从 pending
+		// 中删除，就会出现能读到 seq，但是无法从 pending 中找到的情况。（这里还是有点存疑，
+		// 因为 WriteRequest 最后还会调用 c.encBuf.Flush()，不确定是 c.enc.Encode 时就会
+		// 立马写入，还是等到最后调用 Flush 时才写入）
+		//
+		// 疑问：那可不可以让网络请求在前，写入 pending 在后呢？
+		// 这样可能依然会有问题，因为 recv 这边是先读网络请求，获得 seq，再从 pending 中查找，
+		// 如果 send 这边是网络请求在前， 写入 pending 在后，那么可能存在 recv 的 pending
+		// 查找操作发生在 send 写入 pending 之前，此时 pending 还没有写入这个 seq，所以依然
+		// 会找不到，导致 call == nil
 		case call == nil:
+			err = c.codec.ReadResponseBody(nil)
+			if err != nil {
+				err = errors.New("reading error body: " + err.Error())
+			}
 		case resp.Error != "":
 			call.Error = errors.New(resp.Error)
 			// 虽然发生了错误，但是仍然需要将连接中的剩余数据（body）消费掉

@@ -77,7 +77,7 @@ func NewGobClientCodec(conn io.ReadWriteCloser) *GobClientCodec {
 	return &GobClientCodec{
 		rwc:    conn,
 		dec:    gob.NewDecoder(conn),
-		enc:    gob.NewEncoder(conn),
+		enc:    gob.NewEncoder(buf),
 		encBuf: buf,
 	}
 }

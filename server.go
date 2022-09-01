@@ -27,10 +27,11 @@ type Server struct {
 	registerService sync.Map // key: string val: type struct service
 	sendMu          sync.Mutex
 	wg              sync.WaitGroup
-	reqPool         *sync.Pool
-	respPool        *sync.Pool
+	reqPool         *requestPool
+	respPool        *responsePool
 	reg             registry.Server
 	addr            string
+	debug           bool
 }
 
 func NewServer(ctx context.Context, serviceName, host, port string, reg registry.Server) (*Server, error) {
@@ -39,8 +40,8 @@ func NewServer(ctx context.Context, serviceName, host, port string, reg registry
 	}
 	s := &Server{}
 	s.reg = reg
-	s.reqPool = &sync.Pool{New: func() any { return &codec.RequestHeader{} }}
-	s.respPool = &sync.Pool{New: func() any { return &codec.ResponseHeader{} }}
+	s.reqPool = RequestPool
+	s.respPool = ResponsePool
 	s.addr = fmt.Sprintf("%s:%s", host, port)
 	// 同时添加到注册中心
 	if err := s.reg.Register(ctx, serviceName, s.addr); err != nil {
@@ -100,6 +101,10 @@ func (s *Server) Register(struct_ any) error {
 		return errors.New("该结构体已经注册")
 	}
 	return nil
+}
+
+func (s *Server) OpenDebug() {
+	s.debug = true
 }
 
 // suitableMethods 获取 typ 下的所有合法方法
@@ -209,8 +214,7 @@ func (s *Server) ServerCodec(c codec.ServerCodec) {
 			if req != nil {
 				// 回应错误信息
 				s.sendResponse(sendLock, req, c, invalidRequest, err.Error())
-				req.Reset()
-				s.reqPool.Put(req)
+				s.reqPool.Free(req)
 			}
 			continue
 		}
@@ -222,7 +226,7 @@ func (s *Server) ServerCodec(c codec.ServerCodec) {
 }
 
 func (s *Server) readRequestHeader(c codec.ServerCodec) (svc *service, mtype *MethodInfo, req *codec.RequestHeader, keepReading bool, err error) {
-	req = s.reqPool.Get().(*codec.RequestHeader)
+	req = s.reqPool.Malloc()
 	var errMsg string
 	if err = c.ReadRequestHeader(req); err != nil {
 		if err == io.EOF || err == io.ErrUnexpectedEOF {
@@ -234,8 +238,9 @@ func (s *Server) readRequestHeader(c codec.ServerCodec) (svc *service, mtype *Me
 		// serverCodec 的 for {} 可以被终止
 		return nil, nil, nil, false, errors.New(errMsg)
 	}
-	log.Printf("request head: %+v \n", req)
-
+	if s.debug {
+		log.Printf("request head: %+v \n", req)
+	}
 	// 从这里开始产生的错误属于非严重错误，比如用户传入的 serviceName 格式错误、service 未找到、
 	// method 未找到，这些错误对整个系统影响并不大，所以可以跳过该请求，继续处理该连接上的下个请求
 	keepReading = true
@@ -309,7 +314,7 @@ func (s *Server) readRequest(c codec.ServerCodec) (service *service, mtype *Meth
 }
 
 func (s *Server) sendResponse(sendLock *sync.Mutex, req *codec.RequestHeader, c codec.ServerCodec, reply any, errMsg string) {
-	respHeader := s.respPool.Get().(*codec.ResponseHeader)
+	respHeader := s.respPool.Malloc()
 	respHeader.ServiceMethod = req.ServiceMethod
 	respHeader.Seq = req.Seq
 	if errMsg != "" {
@@ -326,8 +331,9 @@ func (s *Server) sendResponse(sendLock *sync.Mutex, req *codec.RequestHeader, c 
 		log.Println("rpc server: write response err: ", err)
 	}
 	sendLock.Unlock()
-	log.Println("send ok")
+	if s.debug {
+		log.Println("send ok")
+	}
 	// 重新放到对象池中复用
-	respHeader.Reset()
-	s.respPool.Put(respHeader)
+	s.respPool.Free(respHeader)
 }

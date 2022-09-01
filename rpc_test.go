@@ -63,7 +63,7 @@ func TestRpcClient(t *testing.T) {
 	}
 
 	//prefix := "/register-servier"
-	addr, err := client.GetServerAddr(context.Background(), reg, &loadbalance.RoundRobin{}, "/register-servierservice1")
+	addr, err := client.GetServerAddr(context.Background(), reg, &loadbalance.RoundRobin{}, "/register-servier/service1")
 	if err != nil {
 		t.Fatal(err)
 	}
