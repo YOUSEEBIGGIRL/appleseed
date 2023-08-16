@@ -1,8 +1,9 @@
-package appleseed
+package rpcz
 
 import (
-	"github.com/autsu/appleseed/codec"
 	"sync"
+
+	"github.com/autsu/rpcz/codec"
 )
 
 var RequestPool = &requestPool{

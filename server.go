@@ -1,20 +1,22 @@
-package appleseed
+package rpcz
 
 import (
-	"context"
 	"errors"
 	"fmt"
+	"github.com/autsu/rpcz/codec"
+	"github.com/autsu/rpcz/util"
+	reuseport "github.com/kavu/go_reuseport"
 	"go/token"
 	"io"
 	"log"
+	"log/slog"
 	"net"
+	"os"
+	"os/signal"
 	"reflect"
 	"strings"
 	"sync"
-
-	"github.com/autsu/appleseed/codec"
-	"github.com/autsu/appleseed/registry"
-	reuseport "github.com/kavu/go_reuseport"
+	"syscall"
 )
 
 // 发生错误时，将该空结构体作为 body 发送
@@ -29,27 +31,27 @@ type Server struct {
 	wg              sync.WaitGroup
 	reqPool         *requestPool
 	respPool        *responsePool
-	reg             registry.Server
 	addr            string
-	debug           bool
+	serviceName     string
+	conns           []net.Conn
 }
 
-func NewServer(ctx context.Context, serviceName, host, port string, reg registry.Server) (*Server, error) {
-	if reg == nil {
-		panic("register is nil")
-	}
+func NewServer(serviceName, host, port string) (*Server, error) {
 	s := &Server{}
-	s.reg = reg
 	s.reqPool = RequestPool
 	s.respPool = ResponsePool
 	s.addr = fmt.Sprintf("%s:%s", host, port)
-	// 同时添加到注册中心
-	if err := s.reg.Register(ctx, serviceName, s.addr); err != nil {
-		return nil, err
-	}
-	log.Printf("register [serviceName:%s] to [%s:%v] success, register info: [key:%v value: %v]\n",
-		serviceName, s.reg.Name(), s.reg.Addr(), serviceName, s.addr)
+	s.serviceName = serviceName
+
 	return s, nil
+}
+
+func (s *Server) Addr() string {
+	return s.addr
+}
+
+func (s *Server) ServiceName() string {
+	return s.serviceName
 }
 
 func (s *Server) Register(struct_ any) error {
@@ -69,13 +71,13 @@ func (s *Server) Register(struct_ any) error {
 	// struct 必须可导出
 	if !token.IsExported(sname) {
 		errMsg := fmt.Sprintf("rpc.Register: type %v is not exported", stype.String())
-		log.Println(errMsg)
+		util.Log.Error("rpc.Register error", slog.Any("error", errMsg))
 		return errors.New(errMsg)
 	}
 	// struct 不能是匿名结构体
 	if sname == "" {
 		errMsg := "rpc.Register: no service name for type " + stype.String()
-		log.Println(errMsg)
+		util.Log.Error("rpc.Register error", slog.Any("error", errMsg))
 		return errors.New(errMsg)
 	}
 
@@ -84,16 +86,16 @@ func (s *Server) Register(struct_ any) error {
 	srv.val = sval
 	srv.name = sname
 	srv.methods = suitableMethods(stype)
+	// 如果注册的对象没有任何合法的方法
 	if len(srv.methods) == 0 {
 		str := ""
-		// To help the user, see if a pointer receiver would work.
 		method := suitableMethods(reflect.PtrTo(stype))
-		if len(method) != 0 {
+		if len(method) != 0 { // 但是注册对象的指针有，那么给用户提示信息，提示它传入该对象的指针
 			str = "rpc.Register: type " + sname + " has no exported methods of suitable type (hint: pass a pointer to value of that type)"
 		} else {
 			str = "rpc.Register: type " + sname + " has no exported methods of suitable type"
 		}
-		log.Print(str)
+		util.Log.Error("rpc.Register error", slog.Any("error", str))
 		return errors.New(str)
 	}
 
@@ -101,10 +103,6 @@ func (s *Server) Register(struct_ any) error {
 		return errors.New("该结构体已经注册")
 	}
 	return nil
-}
-
-func (s *Server) OpenDebug() {
-	s.debug = true
 }
 
 // suitableMethods 获取 typ 下的所有合法方法
@@ -174,19 +172,34 @@ func isExportedOrBuiltinType(t reflect.Type) bool {
 	return token.IsExported(t.Name()) || t.PkgPath() == ""
 }
 
-func (s *Server) RunWithTCP() error {
+func (s *Server) Run() error {
 	listen, err := reuseport.Listen("tcp", s.addr)
 	//listen, err := net.Listen("tcp", fmt.Sprintf("%s:%s", host, port))
 	if err != nil {
 		return err
 	}
 
+	// 优雅退出
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Kill, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		select {
+		case <-sigCh:
+			// close 掉所有连接
+			for _, conn := range s.conns {
+				conn.Close()
+			}
+			os.Exit(1)
+		}
+	}()
+
 	for {
 		conn, err := listen.Accept()
 		if err != nil {
-			log.Println(err)
+			util.Log.Error("server.Run error", slog.Any("err", err))
 			continue
 		}
+		s.conns = append(s.conns, conn)
 		go s.serverConn(conn)
 	}
 }
@@ -230,17 +243,18 @@ func (s *Server) readRequestHeader(c codec.ServerCodec) (svc *service, mtype *Me
 	var errMsg string
 	if err = c.ReadRequestHeader(req); err != nil {
 		if err == io.EOF || err == io.ErrUnexpectedEOF {
-			errMsg = fmt.Sprintf("rcp server: read header error: %v", err.Error())
-			log.Println(errMsg)
+			// EOF 相关错误说明对方已经断开连接，这种情况没必要进行日志输出，也没必要发送给对方错误，直接 return 掉即可
+			// 此时 return 的 keepReading 将为默认值 false，从而使得外层调用方 serverCodec 中
+			// 的死循环被终止
 			return
 		}
-		// 如果读取错误为 EOF，说明对方已断开连接，此时 keepReading 返回 false，使得最外层的
-		// serverCodec 的 for {} 可以被终止
+		// 如果不是 EOF 错误，则需要返回给调用方，然后会将这个错误信息返回给 client
+		errMsg = fmt.Sprintf("rcp server: read header error: %v", err.Error())
+		util.Log.Error("server.readRequestHeader error", slog.Any("err", errMsg))
 		return nil, nil, nil, false, errors.New(errMsg)
 	}
-	if s.debug {
-		log.Printf("request head: %+v \n", req)
-	}
+	util.Log.Debug("server.readRequestHeader", slog.Any("request head", req))
+
 	// 从这里开始产生的错误属于非严重错误，比如用户传入的 serviceName 格式错误、service 未找到、
 	// method 未找到，这些错误对整个系统影响并不大，所以可以跳过该请求，继续处理该连接上的下个请求
 	keepReading = true
@@ -331,9 +345,9 @@ func (s *Server) sendResponse(sendLock *sync.Mutex, req *codec.RequestHeader, c 
 		log.Println("rpc server: write response err: ", err)
 	}
 	sendLock.Unlock()
-	if s.debug {
-		log.Println("send ok")
-	}
+
+	util.Log.Debug("sendResponse ok")
+
 	// 重新放到对象池中复用
 	s.respPool.Free(respHeader)
 }

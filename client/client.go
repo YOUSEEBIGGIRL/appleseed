@@ -6,29 +6,31 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"sync"
 
-	"github.com/autsu/appleseed/codec"
-	"github.com/autsu/appleseed/loadbalance"
-	"github.com/autsu/appleseed/registry"
+	"github.com/autsu/rpcz/codec"
+	"github.com/autsu/rpcz/loadbalance"
+	"github.com/autsu/rpcz/registry"
+	"github.com/autsu/rpcz/util"
 )
 
-func GetServerAddr(ctx context.Context, reg registry.Client, lb loadbalance.Balancer, serviceName string) (addr string, err error) {
+var ErrShutdown = errors.New("connection is shut down")
+
+func GetServerAddr(ctx context.Context, reg registry.Client, lb loadbalance.Interface, serviceName string) (string, error) {
 	// 从注册中心中获取 serviceName 的所有地址
 	addrs, err := reg.Get(ctx, serviceName)
 	if err != nil {
-		return
+		return "", err
 	}
 	if len(addrs) == 0 {
 		return "", fmt.Errorf("this service[%v] no address", serviceName)
 	}
-
-	for _, addr := range addrs {
-		lb.Add(addr)
+	for _, a := range addrs {
+		lb.Add(loadbalance.Addr{Addr: a})
 	}
 	// 通过负载均衡选择其中的一个
-	addr = lb.Get()
-	return
+	return lb.Get(), nil
 }
 
 type Client struct {
@@ -39,8 +41,8 @@ type Client struct {
 	globalSeq     uint64           // 为 requestHeader 分配 seq
 	pending       map[uint64]*Call // 保存所有请求，请求完成后，会进行移除
 	serverAddr    string           // 当前调用的服务的地址，如果 watch 到该地址下线或者变更，可以进行相应的处理
-	closing       bool             // user has called Close
-	shutdown      bool             // server has told us to stop
+	closing       bool             // 该成员为 true 时，代表客户端主动调用了 Close()
+	shutdown      bool             // 该成员为 true 时，代表服务端那边退出了
 }
 
 func NewClient(conn io.ReadWriteCloser, serverAddr string) *Client {
@@ -72,7 +74,7 @@ func (c *Call) done() {
 	case c.Done <- c:
 	default:
 		// 队列已满，请求被丢弃
-		log.Println("rpc: client chan capacity is full, this call will be discard")
+		util.Log.Warn("rpc: client chan capacity is full, this call will be discard")
 	}
 }
 
@@ -80,7 +82,17 @@ func (c *Client) send(call *Call) {
 	//c.reqMu.Lock()
 	//defer c.reqMu.Unlock()
 
+	// 客户端已经与服务端建立连接，然后在客户端执行 send 前 kill 掉服务端，下面这行会阻塞整个客户端程序（已解决，recv 那边忘写解锁了）
 	c.mu.Lock()
+
+	// 如果服务端已经关闭了，那么就没必要往下走了，直接 return 掉，同时调用 call.done()，让 Call() 那边能够消费到，解除阻塞
+	if c.shutdown || c.closing {
+		c.mu.Unlock()
+		call.Error = ErrShutdown
+		call.done()
+		return
+	}
+
 	seq := c.globalSeq
 	c.globalSeq++
 	c.pending[seq] = call
@@ -89,6 +101,7 @@ func (c *Client) send(call *Call) {
 	c.requestHeader.Seq = seq
 	c.requestHeader.ServiceMethod = call.ServiceMethod
 	if err := c.codec.WriteRequest(&c.requestHeader, call.Args); err != nil {
+		util.Log.Debug("client.send writeRequest error", slog.Any("err", err))
 		c.mu.Lock()
 		call := c.pending[seq]
 		delete(c.pending, seq)
@@ -110,6 +123,7 @@ func (c *Client) recv() {
 			break
 		}
 		seq := resp.Seq
+		// 保护 pending，因为 send() 那边也会操作 pending
 		c.mu.Lock()
 		// 从 pending 中获取对应（seq 相同）的 call，并移除
 		call := c.pending[seq]
@@ -160,17 +174,23 @@ func (c *Client) recv() {
 		}
 	}
 	// 如果流程走到这里，说明发生了 err
+	// 这个锁保护 closing 以及 pending
 	c.mu.Lock()
 	c.shutdown = true
 	// 连接中没有数据可读了，这种情况可能是服务端已经下线了
 	if err == io.EOF {
-
+		if c.closing {
+			err = ErrShutdown
+		} else {
+			err = io.ErrUnexpectedEOF
+		}
 	}
 	// 通知所有剩余的 call 发生了错误
 	for _, call := range c.pending {
 		call.Error = err
 		call.done()
 	}
+	c.mu.Unlock()
 }
 
 func (c *Client) Go(ctx context.Context, serviceMethod string, arg, reply any, done chan *Call) *Call {
@@ -189,7 +209,7 @@ func (c *Client) Go(ctx context.Context, serviceMethod string, arg, reply any, d
 
 	select {
 	case <-ctx.Done():
-		log.Println("time out")
+		util.Log.Debug("client.Go: time out")
 		call.Error = errors.New("rpc call error: time out")
 		call.done()
 		return call
@@ -203,4 +223,15 @@ func (c *Client) Go(ctx context.Context, serviceMethod string, arg, reply any, d
 func (c *Client) Call(ctx context.Context, serviceMethod string, arg, reply any) error {
 	call := <-c.Go(ctx, serviceMethod, arg, reply, make(chan *Call, 1)).Done
 	return call.Error
+}
+
+func (c *Client) Close() error {
+	c.mu.Lock()
+	if c.closing {
+		c.mu.Unlock()
+		return ErrShutdown
+	}
+	c.closing = true
+	c.mu.Unlock()
+	return c.codec.Close()
 }

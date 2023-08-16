@@ -1,17 +1,17 @@
-package appleseed
+package test
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/autsu/appleseed/client"
-	"github.com/autsu/appleseed/loadbalance"
-	"github.com/autsu/appleseed/registry"
+	"github.com/autsu/rpcz"
+	"github.com/autsu/rpcz/client"
+	"github.com/autsu/rpcz/loadbalance"
+	"github.com/autsu/rpcz/registry"
 )
 
 type Args struct {
@@ -39,31 +39,43 @@ func (x *XXX) TimeoutFunc(args *Args, reply *Reply) error {
 	return nil
 }
 
+var serviceName = "service1"
+
 func TestRpcServer(t *testing.T) {
-	reg, err := registry.NewEtcd(context.Background(), []string{"127.0.0.1:2379"}, "", 5)
+	ctx := context.Background()
+	reg, err := registry.NewEtcd(ctx, []string{"127.0.0.1:2379"}, 5)
 	if err != nil {
 		t.Fatal("new etcd error: ", err)
 	}
-	s, err := NewServer(context.Background(), "service1", "127.0.0.1", "8880", reg)
+
+	s, err := rpcz.NewServer(serviceName, "127.0.0.1", "8880")
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	if err := reg.Register(ctx, s); err != nil {
+		t.Fatal(err)
+	}
+
 	if err := s.Register(new(XXX)); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RunWithTCP(); err != nil {
+	if err := s.Run(); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestRpcClient(t *testing.T) {
+	ctx := context.Background()
 	reg, err := registry.NewEtcdClient([]string{"127.0.0.1:2379"})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	//prefix := "/register-servier"
-	addr, err := client.GetServerAddr(context.Background(), reg, &loadbalance.RoundRobin{}, "/register-servier/service1")
+	lb := &loadbalance.RoundRobin{}
+	go reg.Watch(ctx, lb)
+
+	addr, err := client.GetServerAddr(ctx, reg, lb, serviceName)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,8 +84,11 @@ func TestRpcClient(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer conn.Close()
 
 	cli := client.NewClient(conn, addr)
+	t.Log("you can stop server")
+	time.Sleep(time.Second * 10)
 
 	arg := &Args{Str: "abc", X: 10, Y: 20}
 	var reply Reply
@@ -93,13 +108,16 @@ func TestRpcClient(t *testing.T) {
 }
 
 func TestClientTimeout(t *testing.T) {
+	ctx := context.Background()
 	reg, err := registry.NewEtcdClient([]string{"127.0.0.1:2379"})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	//prefix := "/register-servier"
-	addr, err := client.GetServerAddr(context.Background(), reg, &loadbalance.RoundRobin{}, "/register-servier/service1")
+	lb := &loadbalance.RoundRobin{}
+	go reg.Watch(ctx, lb)
+
+	addr, err := client.GetServerAddr(context.Background(), reg, &loadbalance.RoundRobin{}, serviceName)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +131,7 @@ func TestClientTimeout(t *testing.T) {
 
 	arg := &Args{RunTime: time.Minute}
 	rep := &Reply{}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
+	ctx, cancel := context.WithTimeout(ctx, time.Second*3)
 	defer cancel()
 
 	go func() {
@@ -134,66 +152,44 @@ func TestClientTimeout(t *testing.T) {
 }
 
 func TestLoadBalanceServer(t *testing.T) {
-	reg, err := registry.NewEtcd(context.Background(), []string{"127.0.0.1:2379"}, "", 5)
+	ctx := context.TODO()
+	reg, err := registry.NewEtcd(ctx, []string{"127.0.0.1:2379"}, 5)
 	if err != nil {
 		t.Fatal("new etcd error: ", err)
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(3)
+	count := 3
+	port := []string{"8090", "8091", "8092"}
+	wg.Add(count)
 
 	// 模拟三个服务器提供同一个服务
 	// simulate three servers to provide the same service
-	go func() {
-		defer wg.Done()
-		s, err := NewServer(context.Background(), "service1", "127.0.0.1", "8880", reg)
-		if err != nil {
-			fmt.Printf("new server error: %v\n", err)
-			return
-		}
-		if err := s.Register(new(XXX)); err != nil {
-			fmt.Printf("register error: %v\n", err)
-			return
-		}
-		if err := s.RunWithTCP(); err != nil {
-			fmt.Printf("run server error: %v\n", err)
-			return
-		}
-	}()
+	for i := 0; i < count; i++ {
+		i := i
+		go func() {
+			defer wg.Done()
+			s, err := rpcz.NewServer(serviceName, "127.0.0.1", port[i])
+			if err != nil {
+				t.Errorf("new server error: %v\n", err)
+				return
+			}
 
-	go func() {
-		defer wg.Done()
-		s, err := NewServer(context.Background(), "service1", "127.0.0.1", "8880", reg)
-		if err != nil {
-			fmt.Printf("new server error: %v\n", err)
-			return
-		}
-		if err := s.Register(new(XXX)); err != nil {
-			fmt.Printf("register error: %v\n", err)
-			return
-		}
-		if err := s.RunWithTCP(); err != nil {
-			fmt.Printf("run server error: %v\n", err)
-			return
-		}
-	}()
+			if err := reg.Register(ctx, s); err != nil {
+				t.Errorf("register error: %v\n", err)
+				return
+			}
 
-	go func() {
-		defer wg.Done()
-		s, err := NewServer(context.Background(), "service1", "127.0.0.1", "8880", reg)
-		if err != nil {
-			fmt.Printf("new server error: %v\n", err)
-			return
-		}
-		if err := s.Register(new(XXX)); err != nil {
-			fmt.Printf("register error: %v\n", err)
-			return
-		}
-		if err := s.RunWithTCP(); err != nil {
-			fmt.Printf("run server error: %v\n", err)
-			return
-		}
-	}()
+			if err := s.Register(new(XXX)); err != nil {
+				t.Errorf("register error: %v\n", err)
+				return
+			}
+			if err := s.Run(); err != nil {
+				t.Errorf("run server error: %v\n", err)
+				return
+			}
+		}()
+	}
 
 	wg.Wait()
 }
@@ -205,8 +201,7 @@ func TestLoadBalanceClient(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		//prefix := "/register-servier"
-		addr, err := client.GetServerAddr(context.Background(), reg, &loadbalance.RoundRobin{}, "/register-servier/service1")
+		addr, err := client.GetServerAddr(context.Background(), reg, &loadbalance.RoundRobin{}, serviceName)
 		if err != nil {
 			t.Fatal(err)
 		}

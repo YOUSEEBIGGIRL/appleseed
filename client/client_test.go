@@ -2,11 +2,12 @@ package client
 
 import (
 	"context"
-	"github.com/autsu/appleseed/loadbalance"
-	"github.com/autsu/appleseed/registry"
 	"log"
 	"testing"
 	"time"
+
+	"github.com/autsu/rpcz/loadbalance"
+	"github.com/autsu/rpcz/registry"
 )
 
 func TestGetServerAddr(t *testing.T) {

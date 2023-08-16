@@ -1,5 +1,4 @@
 syntax = "proto3";
-package echo;
 option go_package="/";
 
 //  protoc --go_out=. --plugin=protorpc *.proto

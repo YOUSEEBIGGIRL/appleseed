@@ -2,18 +2,19 @@ package registry
 
 import (
 	"context"
-	"github.com/autsu/appleseed/loadbalance"
 	"log"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/autsu/rpcz/loadbalance"
 )
 
 var registry *Etcd
 
 func init() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	r, err := NewEtcd(context.Background(), []string{"127.0.0.1:2379"}, "", 5)
+	r, err := NewEtcd(context.Background(), []string{"127.0.0.1:2379"}, 5)
 	if err != nil {
 		panic(err)
 	}

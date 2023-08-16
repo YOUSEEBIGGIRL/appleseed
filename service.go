@@ -1,10 +1,12 @@
-package appleseed
+package rpcz
 
 import (
-	"github.com/autsu/appleseed/codec"
-	"log"
+	"github.com/autsu/rpcz/util"
+	"log/slog"
 	"reflect"
 	"sync"
+
+	"github.com/autsu/rpcz/codec"
 )
 
 // service 可以理解为是一个对象，它的方法被会被注册到 rpc 中，客户可以调用通过 "对象.方法"
@@ -33,13 +35,15 @@ func (s *service) call(srv *Server, sendLock *sync.Mutex, wg *sync.WaitGroup, me
 	method.Unlock()
 
 	returnValues := method.method.Func.Call([]reflect.Value{s.val, argv, replyv})
-	log.Println("after call, reply value: ", replyv.Interface())
+
+	util.Log.Debug("service.call", slog.Any("reply", replyv.Interface()))
+
 	var errMsg string
 	errRet := returnValues[0].Interface()
 	if errRet != nil {
 		errMsg = errRet.(error).Error()
 	}
 	srv.sendResponse(sendLock, req, c, replyv.Interface(), errMsg)
-	req.Reset()
+	//req.Reset()
 	srv.reqPool.Free(req)
 }

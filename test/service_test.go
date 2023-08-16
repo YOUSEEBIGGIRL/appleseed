@@ -1,4 +1,4 @@
-package appleseed
+package test
 
 import (
 	"testing"

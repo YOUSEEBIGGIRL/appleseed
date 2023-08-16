@@ -2,6 +2,8 @@ package registry
 
 import (
 	"context"
+
+	"github.com/autsu/rpcz"
 )
 
 type Server interface {
@@ -12,7 +14,7 @@ type Server interface {
 	Addr() []string
 
 	// Register 注册 serviceName 到注册中心
-	Register(ctx context.Context, serviceName, addr string) error
+	Register(ctx context.Context, server *rpcz.Server) error
 
 	// Unregister 从注册中心中删除 serviceName
 	Unregister(ctx context.Context, serviceName string) (err error)

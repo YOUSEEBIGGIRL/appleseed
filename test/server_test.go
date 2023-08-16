@@ -1,4 +1,4 @@
-package appleseed
+package test
 
 import (
 	"log"
@@ -14,7 +14,7 @@ func TestServer(t *testing.T) {
 	// if err := server.Register(new(XXX)); err != nil {
 	// 	log.Fatalln(err)
 	// }
-	// if err := server.RunWithTCP("localhost", "8080"); err != nil {
+	// if err := server.Run("localhost", "8080"); err != nil {
 	// 	log.Fatalln(err)
 	// }
 }
