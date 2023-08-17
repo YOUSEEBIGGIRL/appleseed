@@ -1,12 +1,12 @@
 package rpcz
 
 import (
-	"github.com/autsu/rpcz/util"
 	"log/slog"
 	"reflect"
 	"sync"
 
 	"github.com/autsu/rpcz/codec"
+	"github.com/autsu/rpcz/util"
 )
 
 // service 可以理解为是一个对象，它的方法被会被注册到 rpc 中，客户可以调用通过 "对象.方法"

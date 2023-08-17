@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"log/slog"
 	"path"
 
@@ -104,16 +103,10 @@ func (e *Etcd) Register(ctx context.Context, server *rpcz.Server) (err error) {
 	util.Log.Debug("register new service",
 		slog.String("service name", server.ServiceName()),
 		slog.String("registration center info", fmt.Sprintf("name: %v, addr: %v", e.Name(), e.Addr())),
-		slog.String("registry key/value info", fmt.Sprintf("key: %v, value: %v", server.ServiceName(), e.Addr())),
+		slog.String("registry key/value info", fmt.Sprintf("key: %v, value: %v", key, server.Addr())),
 	)
 
 	e.services = append(e.services, server.ServiceName())
-	//go func() {
-	//	if err_ := e.Watch(context.Background(), serviceName, &loadbalance.RoundRobin{}); err_ != nil {
-	//		err = err_
-	//		return
-	//	}
-	//}()
 	return
 }
 
@@ -140,60 +133,9 @@ func (e *Etcd) Get(ctx context.Context, serviceName string) (addrs []string, err
 	return
 }
 
-// Watch TODO: 需要重新设计，lo 这个参数不合理
-// 废弃
-func (e *Etcd) __Watch(ctx context.Context, serviceName string, lo loadbalance.Interface) error {
-	watchChan := e.conn.Watch(ctx, path.Join(servicePrefix, serviceName), client.WithPrefix(), client.WithPrevKV())
-	for {
-		select {
-		case resp := <-watchChan:
-			for _, event := range resp.Events {
-				switch event.Type {
-				case client.EventTypePut:
-					if event.IsCreate() { // 新的 key
-						log.Printf("watch a new key[key=%s, val=%s] put\n", event.Kv.Key, event.Kv.Value)
-						//lo.Add(string(event.Kv.Value))
-					} else if event.IsModify() { // 已存在的 key 的 val 发生了变化
-						log.Printf("watch a key update[key=%s, new val=%s]\n", event.Kv.Key, event.Kv.Value)
-						//if err := lo.Update(string(event.PrevKv.Value), string(event.Kv.Value)); err != nil {
-						//	return err
-						//}
-					}
-				case client.EventTypeDelete:
-					log.Printf("watch a key[key=%s, val=%s] delete\n", event.Kv.Key, event.Kv.Value)
-					if err := lo.Delete(string(event.Kv.Value)); err != nil {
-						return err
-					}
-				}
-			}
-		}
-	}
-}
-
-func (e *Etcd) Watch1(ctx context.Context, handleEvent func(event *client.Event)) error {
-	var err error
-	for _, service := range e.services {
-		service := service
-		go func() {
-			watchChan := e.conn.Watch(ctx, path.Join(servicePrefix, service), client.WithPrefix(), client.WithPrevKV())
-			for {
-				select {
-				case <-ctx.Done():
-					err = ctx.Err()
-					return
-				case resp := <-watchChan:
-					for _, event := range resp.Events {
-						handleEvent(event)
-					}
-				}
-			}
-		}()
-	}
-	return err
-}
-
 // Watch watch key 并更新 loadbalance 信息
 func (e *Etcd) Watch(ctx context.Context, lb loadbalance.Interface) {
+	util.Log.Debug("start watch...")
 	for _, service := range e.services {
 		service := service
 		go func() {

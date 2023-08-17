@@ -48,10 +48,7 @@ func TestRpcServer(t *testing.T) {
 		t.Fatal("new etcd error: ", err)
 	}
 
-	s, err := rpcz.NewServer(serviceName, "127.0.0.1", "8880")
-	if err != nil {
-		t.Fatal(err)
-	}
+	s := rpcz.NewServer(serviceName, "127.0.0.1", "8880")
 
 	if err := reg.Register(ctx, s); err != nil {
 		t.Fatal(err)
@@ -87,8 +84,6 @@ func TestRpcClient(t *testing.T) {
 	defer conn.Close()
 
 	cli := client.NewClient(conn, addr)
-	t.Log("you can stop server")
-	time.Sleep(time.Second * 10)
 
 	arg := &Args{Str: "abc", X: 10, Y: 20}
 	var reply Reply
@@ -169,11 +164,7 @@ func TestLoadBalanceServer(t *testing.T) {
 		i := i
 		go func() {
 			defer wg.Done()
-			s, err := rpcz.NewServer(serviceName, "127.0.0.1", port[i])
-			if err != nil {
-				t.Errorf("new server error: %v\n", err)
-				return
-			}
+			s := rpcz.NewServer(serviceName, "127.0.0.1", port[i])
 
 			if err := reg.Register(ctx, s); err != nil {
 				t.Errorf("register error: %v\n", err)

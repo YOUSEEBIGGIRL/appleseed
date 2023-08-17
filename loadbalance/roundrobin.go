@@ -65,6 +65,9 @@ func (r *RoundRobin) Update(oldAddr Addr, newAddr Addr) error {
 }
 
 func (r *RoundRobin) Delete(addr string) error {
+	if addr == "" {
+		return nil
+	}
 	if r.addrsMap == nil {
 		r.addrsMap = make(map[string]int64)
 	}

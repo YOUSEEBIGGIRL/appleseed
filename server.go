@@ -3,9 +3,6 @@ package rpcz
 import (
 	"errors"
 	"fmt"
-	"github.com/autsu/rpcz/codec"
-	"github.com/autsu/rpcz/util"
-	reuseport "github.com/kavu/go_reuseport"
 	"go/token"
 	"io"
 	"log"
@@ -17,6 +14,10 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+
+	"github.com/autsu/rpcz/codec"
+	"github.com/autsu/rpcz/util"
+	reuseport "github.com/kavu/go_reuseport"
 )
 
 // 发生错误时，将该空结构体作为 body 发送
@@ -36,14 +37,14 @@ type Server struct {
 	conns           []net.Conn
 }
 
-func NewServer(serviceName, host, port string) (*Server, error) {
+func NewServer(serviceName, host, port string) *Server {
 	s := &Server{}
 	s.reqPool = RequestPool
 	s.respPool = ResponsePool
 	s.addr = fmt.Sprintf("%s:%s", host, port)
 	s.serviceName = serviceName
 
-	return s, nil
+	return s
 }
 
 func (s *Server) Addr() string {
